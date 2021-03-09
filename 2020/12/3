@@ -1,0 +1,282 @@
+/*
+ *	算法思想：本题是一道大型字符串模拟题。考察代码能力，情况需要考虑细致。
+ *			  整体功能分为三部分，增删改，分别封装在 executeC、executeR、executeQ
+ *			  通用的过程是对字符串进行分割，以最后一个/为分界点，前面作为目录，后面作为文件。先对目录进行判断，再对文件进行判断。下面分别陈述下三个过程：
+ *			  executeC:
+ *			  1.对字符串进行分割，提取出目录序列。将目录切分成文件名，遍历如果没有出现则新建。若出现但类型是普通文件返回N
+ *			  2.判断最后一个文件，检索如果找到该文件但类型为目录，返回N
+ *			  3. 判断配额情况：计算出改变配额（不存在以新建大小为改变配额，存在做差原为负作为改变配额）。依次向上遍历，真实额度超过预定额度返回N
+ *			  4.满足配额要求新建节点，完善节点信息，再向上更改每层真实配额
+ *			  executeR:
+ *			  1. 对字符串进行分割，提取出目录序列。将目录分割成文件名，检索如果没找到说明没有，算删除正确返回Y
+ *			  2. 提取最后文件名，检索，如果没有算删除正确返回Y。如果找到，判断类型：普通文件，从其父节点删除，更改父节点的真实子节点大小。共同向上遍历更改真实子目录配额大小 
+ *			  executeQ:
+ *			  1.输入，为0要用无穷。字符串分割，分出目录和文件。在目录索引时，如果没找到无法重新分配返回N，分配份额只适用于目录，如果找到了但类型是不同文件也无法分割。返回N
+ *			  2.对最后文件进行处理（正常应该是目录），如果不是目录返回N。输入配额与真实配额比较，若输入配额更小更新失败返回N。否则更新配额返回Y 
+ *			  
+ *			  本题中在建立时，建立失败有一个消除操作。即Reback函数，建立时将每步存储在reback中，发现问题调用删除。
+ *			  对于字符串和map有相关的要求 
+*/
+#include<bits/stdc++.h>
+using namespace std;
+int num = 0; // num代表总结点数
+struct node {
+	int father; // 父节点编号，用于反向遍历
+	map<string, int>child; // 孩子节点
+	int type; // 1:文件 2:目录
+	// 文件大小是10^9，使用long long 
+	long long ld, lr; // ld代表目录最大限额，lr代表子节点最大限额
+	long long size;
+	long long ld_r, lr_r; // ld_r代表真实目录最大限额，lr_r代表真实子节点最大限额 
+}Node[4000010]; // 预先分配足够空间
+
+vector<pair<int, string> > reback;
+// function:情况之前的错误操作 
+void Reback() {
+	for (int i=0; i<reback.size(); i++) {
+		int a = reback[i].first;
+		string b = reback[i].second;
+		Node[a].child.erase(Node[a].child.find(b));
+	}
+}
+
+string executeC() {
+	int i, j;
+	string filepath;
+	long long filesize;
+	cin >> filepath >> filesize;
+	int last = -1;
+	// 寻找目录和文件的分界点,前面是目录，后面是文件 
+	for (i=filepath.length()-1; i>=0; i--) {
+		if (filepath[i] == '/') {
+			last = i;
+			break;
+		}
+	}
+	int current = 1;
+	int id = 0;
+	reback.clear();
+	int oldnum = num;
+	// 完成前面的目录操作
+	while (current < last) {
+		string t = ""; // t保存的是目录名
+		while (current < last && filepath[current] != '/') {
+			t = t + filepath[current];
+			current++;
+		}
+		current++; // 跳过/,指向下一个目录首字母
+		if (Node[id].child.find(t) == Node[id].child.end()) { // 说明没有找到该目录，需要新建 
+			num++;
+			// 创建新节点 
+			Node[id].child[t] = num; // 为t赋予新的编号
+			Node[num].father = id;
+			Node[num].type = 2;
+			Node[num].ld = LLONG_MAX / 3;
+			Node[num].lr = LLONG_MAX / 3;
+			reback.push_back(make_pair(id, t)); // ???
+			id = num;
+		}
+		else { // 找到该节点，做判断如果是文件返回错误，目录继续向下 
+			int childid = Node[id].child[t];
+			if (Node[childid].type == 1) {
+				num = oldnum; // 清空前面建立的所有点
+				Reback(); 
+				return "N";
+			}
+			id = childid;
+		}
+	} 
+	// 完成文件操作
+	string t = "";
+	for (i=last+1; i<filepath.length(); i++) { // 将文件名读取到t中 
+		t = t + filepath[i];
+	} 
+	if (Node[id].child.find(t) != Node[id].child.end()) { // 目标文件已存在 
+		int childid = Node[id].child[t];
+		if (Node[childid].type == 2) { // 目标文件应该是文件，如果是目录清除之前的操作 
+			num = oldnum;
+			Reback();
+			return "N";
+		}
+	}
+	long long changesize = 0;
+	if (Node[id].child.find(t) == Node[id].child.end())
+		changesize = filesize;
+	else
+		changesize = -Node[Node[id].child[t]].size + filesize; // 前面的负号是为了与当前限额相加准备的，相当于把当前限额剪掉旧文件大小再加上新文件大小 
+	if (Node[id].ld_r + changesize > Node[id].ld) { // 如果当前限额加上变动限额超过最大限额 
+		num = oldnum;
+		Reback();
+		return "N";
+	}	
+	int now = id;
+	while (now != -1) { // 向上依次检索，判断是否配额超出要求 
+		if (Node[now].lr_r+changesize > Node[now].lr) {
+			id = oldnum;
+			Reback();
+			return "N";
+		}
+		now = Node[now].father;
+	}
+	if (Node[id].child.find(t) == Node[id].child.end()) { // 满足配额要求，并且没找到同名文件，说明需要创建新文件 
+		num++;
+		Node[num].type = 1;
+		Node[num].father = id;
+		Node[num].size = filesize;
+		Node[id].child[t] = num;
+	}
+	else { // 满足配额要求，文件已存在，更改文件大小 
+		Node[Node[id].child[t]].size = filesize;
+	}
+	// 更改真实配额 
+	Node[id].ld_r = Node[id].ld_r + changesize;
+	now = id;
+	while (now != -1) {
+		Node[now].lr_r = Node[now].lr_r + changesize;
+		now = Node[now].father;
+	}
+	return "Y";
+}
+
+string executeR() {
+	int i;
+	string filepath;
+	cin >> filepath;
+	int current = 1;
+	int id = 0;
+	int last = -1;
+	// 寻找分界点 
+	for (i=filepath.length()-1; i>=0; i--) {
+		if (filepath[i] == '/') {
+			last = i;
+			break;
+		}
+	}
+	while (current < last) {
+		string t = ""; // 截取目录名保存在t中 
+		while (current < last && filepath[current] != '/') {
+			t = t + filepath[current];
+			current++;
+		}
+		current++;
+		if (Node[id].child.find(t) == Node[id].child.end()) { // 删除操作中没找到指定目录，说明不存在，代表删除成功返回Y 
+			return "Y";
+		}
+		else {
+			int childid = Node[id].child[t];
+			if (Node[childid].type == 1)  // 找到该文件，但本应是目录文件，结果是普通文件。无法删除，也算删除成功，返回Y 
+				return "Y";	
+			id = childid;
+		} 
+	}
+	// 下面判断文件
+	string t = ""; // 将文件名读到t中 
+	for (i=last+1; i<filepath.length(); i++) {
+		t = t + filepath[i];
+	}
+	if (Node[id].child.find(t) == Node[id].child.end()) { // 遍历文件没找到，说明不存在该文件，无需删除，返回Y 
+		return "Y";
+	} 
+	long long delsize = 0;
+	int delNode = Node[id].child[t];
+	if (Node[delNode].type == 1) { // 如果文件是普通文件,更改当前子节点真实配额 
+		Node[id].ld_r = Node[id].ld_r - Node[delNode].size;
+		delsize = Node[delNode].size;
+		Node[id].child.erase(Node[id].child.find(t));
+	}
+	else if (Node[delNode].type == 2) { // 如果文件是目录,要删除的就是当前目录的真实大小 
+		delsize = Node[delNode].lr_r;
+		Node[id].child.erase(Node[id].child.find(t)); 
+	}
+	// 向上更改所有目录的配额 
+	int now = id;
+	while (now != -1) {
+		Node[now].lr_r = Node[now].lr_r-delsize;
+		now = Node[now].father;
+	}
+	return "Y"; 
+}
+
+string executeQ() {
+	int i;
+	string filepath;
+	cin >> filepath;
+	long long ld, lr;
+	cin >> ld >> lr;
+	// 为0代表值为无限大 
+	if (ld == 0)
+		ld = LLONG_MAX / 3;
+	if (lr == 0)
+		lr = LLONG_MAX / 3;
+	int id = 0;
+	int last = -1;
+	int current = 1; // current为1是忽略根目录的/ 
+	// 确定分界线 
+	for (i=filepath.length()-1; i>=0; i--) {
+		if (filepath[i] == '/') {
+			last = i;
+			break;
+		}
+	}
+	// 处理目录部分 
+	while (current < last) {
+		string t = "";
+		while (current < last && filepath[current] != '/') {
+			t = t + filepath[current];
+			current++;
+		}
+		current++;
+		if (Node[id].child.find(t) == Node[id].child.end())  // 没找到该目录，无法完成重新配额操作，返回N 
+			return "N";
+		else {
+			int childid = Node[id].child[t];
+			if (Node[childid].type == 1) // 本应该是目录文件，但实际上是普通文件,出错返回N 
+				return "N";
+			id = childid;
+		}
+	}
+	// 处理文件部分
+	string t = "";
+	for (i=last+1; i<filepath.length(); i++) {
+		t = t + filepath[i]; 
+	} 
+	int Qnode = 0;
+	if (t == "")
+		Qnode = 0;
+	else {
+		if (Node[id].child.find(t) == Node[id].child.end()) // 重新配置的文件不存在，返回N 
+			return "N";
+		else
+			Qnode = Node[id].child[t]; 
+	}
+	if (Node[Qnode].type == 1) // 重新配置大小的应该是一个目录，是文件返回N 
+		return "N";
+	if (ld<Node[Qnode].ld_r || lr<Node[Qnode].lr_r) // 如果新额度值比现有的真实额度小，无法成功配置，返回N 
+		return "N";
+	// 更新额度 
+	Node[Qnode].ld = ld;
+	Node[Qnode].lr = lr;
+	return "Y";
+}
+
+int main(void) {
+	int i, j;
+	Node[0].type = 2;
+	Node[0].ld = LLONG_MAX / 3; // LLONG_MAX代表long long类型的最大值 
+	Node[0].lr = LLONG_MAX / 3;
+	Node[0].father = -1;
+	int n;
+	cin >> n; // n代表操作个数
+	// 总共三种情况，函数返回值为string类型 
+	for (int i=0; i<n; i++) {
+		char ch;
+		cin >> ch;
+		if (ch == 'C')
+			cout << executeC() << endl;
+		else if (ch == 'R')
+			cout << executeR() << endl;
+		else if (ch == 'Q')
+			cout << executeQ() << endl;
+	}  
+	return 0;
+} 
